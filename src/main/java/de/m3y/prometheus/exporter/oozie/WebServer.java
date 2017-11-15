@@ -41,7 +41,7 @@ public class WebServer {
     }
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 2) {
+        if (args.length <= 2) {
             printUsageAndExit();
         }
 
@@ -62,6 +62,7 @@ public class WebServer {
         System.err.println("    -oozie.url=<Oozie API Url>               Oozie API oozieApiUrl, eg http://localhost:11000/oozie"); // NOSONAR
         System.err.println("    -oozie.user=<USER>                       Oozie API user for authentication");
         System.err.println("    -oozie.password=<PWD>                    Oozie API password for authentication");
+        System.err.println("    -oozie.password.env=<ENV VAR>            Env var containing Oozie API password for authentication");
         System.err.println("    [-skipHttpsVerification]                 Skip SSL/TLS verification for Oozie URL"); // NOSONAR
         System.err.println("");
         System.exit(1);
@@ -93,6 +94,8 @@ public class WebServer {
                 config.oozieUser = arg.substring("-oozie.user=".length());
             } else if (arg.startsWith("-oozie.password=")) {
                 config.ooziePassword = arg.substring("-oozie.password=".length());
+            } else if (arg.startsWith("-oozie.password.env=")) {
+                config.ooziePassword = System.getenv(arg.substring("-oozie.password.env=".length()));
             } else {
                 System.err.println("Unknown option <" + arg + "> in " + Arrays.toString(args));
                 printUsageAndExit();
