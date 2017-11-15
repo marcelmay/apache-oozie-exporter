@@ -63,15 +63,14 @@ public class WebServer {
         System.err.println("    -oozie.user=<USER>                       Oozie API user for authentication");
         System.err.println("    -oozie.password=<PWD>                    Oozie API password for authentication");
         System.err.println("    -oozie.password.env=<ENV VAR>            Env var containing Oozie API password for authentication");
-        System.err.println("    [-skipHttpsVerification]                 Skip SSL/TLS verification for Oozie URL"); // NOSONAR
+        System.err.println("    [-skipHttpsVerification]                 Skip SSL/TLS verification for Oozie HTTPS URL"); // NOSONAR
         System.err.println("");
         System.exit(1);
     }
 
     private static Config parseArgs(String[] args) {
         Config config = new Config();
-        for (int i = 0; i < args.length; i++) {
-            String arg = args[i];
+        for (String arg : args) {
             if (arg.equals("-skipHttpsVerification")) {
                 config.skipHttpsVerification = true;
             } else if (arg.startsWith("-web.listen-address=")) {
