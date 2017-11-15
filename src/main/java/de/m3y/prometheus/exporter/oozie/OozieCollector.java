@@ -94,16 +94,16 @@ public class OozieCollector extends Collector {
 
             final OozieClient.Metrics metrics = oozieClient.getMetrics();
             if (null != metrics) {
-                addCounters(mfs, metrics.getCounters());
-                addGauges(mfs, metrics.getGauges());
+                addCounters(mfs, metrics.getCounters(), "counters");
+                addGauges(mfs, metrics.getGauges(),"gauges");
 //                metrics.getHistograms() TODO!
 //                addMetricsTimers(mfs, metrics.getTimers()); TODO!
             } else {
                 final OozieClient.Instrumentation instrumentation = oozieClient.getInstrumentation();
-                addCounters(mfs, instrumentation.getCounters());
-                addGauges(mfs, instrumentation.getSamplers());
-                addGauges(mfs, instrumentation.getVariables());
-                addInstrumentationTimers(mfs, instrumentation.getTimers());
+                addCounters(mfs, instrumentation.getCounters(), "counters");
+                addGauges(mfs, instrumentation.getSamplers(), "samplers");
+                addGauges(mfs, instrumentation.getVariables(), "variables");
+                addInstrumentationTimers(mfs, instrumentation.getTimers(), "timers");
             }
         } catch (Exception e) {
             METRIC_SCRAPE_ERROR.inc();
@@ -122,10 +122,10 @@ public class OozieCollector extends Collector {
 //        LOGGER.warn("Not yet impl! TODO!!!");
 //    }
 
-    private void addInstrumentationTimers(List<MetricFamilySamples> mfs, Map<String, OozieClient.Instrumentation.Timer> timers) {
+    private void addInstrumentationTimers(List<MetricFamilySamples> mfs, Map<String, OozieClient.Instrumentation.Timer> timers, String group) {
         for (Map.Entry<String, OozieClient.Instrumentation.Timer> timerEntry : timers.entrySet()) {
             final OozieClient.Instrumentation.Timer value = timerEntry.getValue();
-            final String namePrefix = createName(timerEntry.getKey());
+            final String namePrefix = createName(group + "_" + timerEntry.getKey());
             mfs.add(new GaugeMetricFamily(namePrefix + "_own_max_time", "", value.getOwnMaxTime()));
             mfs.add(new GaugeMetricFamily(namePrefix + "_own_min_time", "", value.getOwnMinTime()));
             mfs.add(new GaugeMetricFamily(namePrefix + "_own_avg_time", "", value.getOwnTimeAverage()));
@@ -138,28 +138,28 @@ public class OozieCollector extends Collector {
         }
     }
 
-    private void addGauges(List<MetricFamilySamples> mfs, Map<String, ?> gauges) {
+    private void addGauges(List<MetricFamilySamples> mfs, Map<String, ?> gauges,String group) {
         for (Map.Entry<String, ?> gaugeEntry : gauges.entrySet()) {
             final Object value = gaugeEntry.getValue();
             if (value instanceof Number) {
-                mfs.add(new GaugeMetricFamily(createName(gaugeEntry.getKey()), "", ((Number) value).doubleValue()));
+                mfs.add(new GaugeMetricFamily(createName(group + "_" + gaugeEntry.getKey()), "", ((Number) value).doubleValue()));
             } else if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug("Unhandled {} with value {} of type {}",
-                        gaugeEntry.getKey(), gaugeEntry.getValue(), gaugeEntry.getValue().getClass());
+                LOGGER.debug("Unhandled {} : {} with value {} of type {}",
+                        group, gaugeEntry.getKey(), gaugeEntry.getValue(), gaugeEntry.getValue().getClass());
             }
         }
     }
 
-    private void addCounters(List<MetricFamilySamples> mfs, Map<String, Long> counters) {
+    private void addCounters(List<MetricFamilySamples> mfs, Map<String, Long> counters, String group) {
         for (Map.Entry<String, Long> counterEntry : counters.entrySet()) {
-            mfs.add(new CounterMetricFamily(createName(counterEntry.getKey()), "", counterEntry.getValue()));
+            mfs.add(new CounterMetricFamily(createName(group + "_" + counterEntry.getKey()), "", counterEntry.getValue()));
         }
     }
 
-    private static final Pattern PATTERN_DOT = Pattern.compile("\\.");
+    private static final Pattern PATTERN_INVALID_METRIC_NAME_CHARS = Pattern.compile("\\.|-|#");
 
     private static String createName(String key) {
-        return METRIC_PREFIX + PATTERN_DOT.matcher(key).replaceAll("_");
+        return METRIC_PREFIX + PATTERN_INVALID_METRIC_NAME_CHARS.matcher(key).replaceAll("_");
     }
 }
 
