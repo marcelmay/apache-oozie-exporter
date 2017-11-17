@@ -41,7 +41,8 @@ public class WebServer {
     }
 
     public static void main(String[] args) throws Exception {
-        if (args.length <= 2) {
+        if (args.length < 2) {
+            System.err.println("Expected more arguments, got "+Arrays.toString(args));
             printUsageAndExit();
         }
 
@@ -60,9 +61,9 @@ public class WebServer {
         System.err.println("OPTIONS:");
         System.err.println("    -web.listen-address=[<hostname>:]<port>  Exporter listener address"); // NOSONAR
         System.err.println("    -oozie.url=<Oozie API Url>               Oozie API oozieApiUrl, eg http://localhost:11000/oozie"); // NOSONAR
-        System.err.println("    -oozie.user=<USER>                       Oozie API user for authentication");
-        System.err.println("    -oozie.password=<PWD>                    Oozie API password for authentication");
-        System.err.println("    -oozie.password.env=<ENV VAR>            Env var containing Oozie API password for authentication");
+        System.err.println("    [-oozie.user=<USER>]                     Oozie API user for authentication");
+        System.err.println("    [-oozie.password=<PWD>]                  Oozie API password for authentication");
+        System.err.println("    [-oozie.password.env=<ENV VAR>]          Env var containing Oozie API password for authentication");
         System.err.println("    [-skipHttpsVerification]                 Skip SSL/TLS verification for Oozie HTTPS URL"); // NOSONAR
         System.err.println("");
         System.exit(1);
