@@ -5,10 +5,7 @@ import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Pattern;
 import javax.net.ssl.*;
 
@@ -90,13 +87,13 @@ public class OozieCollector extends Collector {
 
             final OozieClient.Metrics metrics = oozieClient.getMetrics();
             if (null != metrics) {
-                addCounters(mfs, metrics.getCounters(), "counters");
+                addCounters(mfs, metrics.getCounters());
                 addGauges(mfs, metrics.getGauges(), "gauges");
 //                metrics.getHistograms() TODO!
 //                addMetricsTimers(mfs, metrics.getTimers()); TODO!
             } else {
                 final OozieClient.Instrumentation instrumentation = oozieClient.getInstrumentation();
-                addCounters(mfs, instrumentation.getCounters(), "counters");
+                addCounters(mfs, instrumentation.getCounters());
                 addGauges(mfs, instrumentation.getSamplers(), "samplers");
                 addGauges(mfs, instrumentation.getVariables(), "variables");
                 addInstrumentationTimers(mfs, instrumentation.getTimers(), "timers");
@@ -146,9 +143,22 @@ public class OozieCollector extends Collector {
         }
     }
 
-    private void addCounters(List<MetricFamilySamples> mfs, Map<String, Long> counters, String group) {
+    static final CounterMetricFamily COUNTER_METRIC_FAMILY = new CounterMetricFamily(METRIC_PREFIX + "counter",
+            "",
+            Arrays.asList("counter_group_total", "c_type"));
+
+    private void addCounters(List<MetricFamilySamples> mfs, Map<String, Long> counters) {
         for (Map.Entry<String, Long> counterEntry : counters.entrySet()) {
-            mfs.add(new CounterMetricFamily(escapeName(group + "_" + counterEntry.getKey()), "", counterEntry.getValue()));
+            // Example : jpa.GET_RUNNING_ACTIONS
+            final String key = counterEntry.getKey();
+            int idx = key.indexOf('.');
+            if (idx > 0) {
+                String counterType = key.substring(0, idx);
+                String counterName = key.substring(idx + 1);
+                mfs.add(COUNTER_METRIC_FAMILY.addMetric(Arrays.asList(counterType, counterName), counterEntry.getValue()));
+            } else {
+                LOGGER.warn("Not supported : oozie counter without counter type part in key");
+            }
         }
     }
 
