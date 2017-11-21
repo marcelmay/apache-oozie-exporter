@@ -1,18 +1,25 @@
 package de.m3y.prometheus.exporter.oozie;
 
-import java.nio.charset.StandardCharsets;
+import java.io.IOException;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
-import java.util.*;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 import javax.net.ssl.*;
 
 import io.prometheus.client.Collector;
 import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
+import okhttp3.*;
 import org.apache.oozie.client.OozieClient;
+import org.apache.oozie.client.OozieClient.Metrics;
+import org.apache.oozie.client.rest.RestConstants;
+import org.json.simple.JSONObject;
+import org.json.simple.JSONValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,29 +35,160 @@ public class OozieCollector extends Collector {
 
     private static final Counter METRIC_SCRAPE_REQUESTS = Counter.build()
             .name(METRIC_PREFIX + "scrape_requests_total")
-            .help("Exporter requests made").register();
+            .help("Exporter requests made")
+            .labelNames("oozie_api")
+            .register();
     private static final Counter METRIC_SCRAPE_ERROR = Counter.build()
             .name(METRIC_PREFIX + "scrape_errors_total")
-            .help("Counts failed scrapes.").register();
+            .help("Counts failed scrapes.")
+            .labelNames("oozie_api")
+            .register();
 
     private static final Gauge METRIC_SCRAPE_DURATION = Gauge.build()
             .name(METRIC_PREFIX + "scrape_duration_seconds")
-            .help("Scrape duration").register();
+            .help("Scrape duration")
+            .labelNames("oozie_api")
+            .register();
 
-    private final OozieClient oozieClient; // Thread safe, according to Javadocs
+    static class OozieClientHack extends OozieClient {
+        public Metrics createMetrics(JSONObject json) {
+            return new Metrics(json); // Requires enclosing OozieClient, unfortunately.
+        }
+
+        public Instrumentation createInstrumentation(JSONObject json) {
+            return new Instrumentation(json);
+        }
+    }
+
+    private static final OozieClientHack OOZIE_CLIENT_HACK = new OozieClientHack();
+
+    abstract class AbstractOozieCollector extends Collector {
+        final OkHttpClient httpClient;
+        final Request request;
+        final String apiLabel;
+
+        protected AbstractOozieCollector(String apiLabel, OkHttpClient httpClient, Request request) {
+            this.httpClient = httpClient;
+            this.request = request;
+            this.apiLabel = apiLabel;
+        }
+
+        JSONObject parseJsonObject(Request apiRequest) {
+            try {
+                return (JSONObject) JSONValue.parse(httpClient.newCall(apiRequest).execute().body().string());
+            } catch (IOException e) {
+                throw new IllegalStateException("Can not invoke/parse call to " + apiRequest.url());
+            }
+        }
+
+        @Override
+        public List<MetricFamilySamples> collect() {
+            try (Gauge.Timer timer = METRIC_SCRAPE_DURATION.labels(apiLabel).startTimer()) {
+                METRIC_SCRAPE_REQUESTS.labels(apiLabel).inc();
+                scrape();
+            } catch (Exception e) {
+                METRIC_SCRAPE_ERROR.labels(apiLabel).inc();
+                LOGGER.error("Scrape failed", e);
+            }
+            return Collections.EMPTY_LIST;
+        }
+
+        protected abstract void scrape();
+
+        boolean isAvailable() {
+            try {
+                final Response response = httpClient.newCall(request).execute();
+                LOGGER.info("Calling "+request.url() + " : " + response.code() + " / " + response.body().string());
+                return response.code() == 200;
+            } catch (IOException e) {
+                return false;
+            }
+        }
+    }
+
+    class OozieAdminInstrumentationCollector extends AbstractOozieCollector {
+        OozieAdminInstrumentationCollector(OkHttpClient httpClient, Config config) {
+            super("admin_instrumentation",
+                    httpClient,
+                    new Request.Builder()
+                            .url(config.oozieApiUrl + '/' + RestConstants.ADMIN + '/' + RestConstants.ADMIN_INSTRUMENTATION_RESOURCE)
+                            .build());
+        }
+
+        @Override
+        public void scrape() {
+            final OozieClient.Instrumentation instrumentation = getInstrumentation();
+            addCounters(instrumentation.getCounters());
+            addGauges(instrumentation.getSamplers(), "samplers");
+            addGauges(instrumentation.getVariables(), "variables");
+            addInstrumentationTimers(instrumentation.getTimers());
+        }
+
+        public OozieClient.Instrumentation getInstrumentation() {
+            JSONObject json = parseJsonObject(request);
+            return OOZIE_CLIENT_HACK.createInstrumentation(json);
+        }
+    }
+
+    class OozieAdminMetricsCollector extends AbstractOozieCollector {
+        OozieAdminMetricsCollector(OkHttpClient httpClient, Config config) {
+            super("admin_metrics",
+                    httpClient,
+                    new Request.Builder()
+                            .url(config.oozieApiUrl + '/' + RestConstants.ADMIN + '/' + RestConstants.ADMIN_METRICS_RESOURCE)
+                            .build());
+        }
+
+        @Override
+        public void scrape() {
+            final Metrics metrics = getMetrics();
+            addCounters(metrics.getCounters());
+            addGauges(metrics.getGauges(), "gauges");
+            //                metrics.getHistograms() TODO!
+            //                addMetricsTimers(mfs, metrics.getTimers()); TODO!
+        }
+
+        public Metrics getMetrics() {
+            JSONObject json = parseJsonObject(request);
+            return OOZIE_CLIENT_HACK.createMetrics(json);
+        }
+
+    }
 
     OozieCollector(Config config) {
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info("Starting Oozie exporter with Oozie API base URL  "+config.oozieApiUrl);
+        }
         if (config.skipHttpsVerification) {
             disableHttpsVerification();
         }
 
-        oozieClient = new OozieClient(config.oozieApiUrl);
-
+        OkHttpClient.Builder builder = new OkHttpClient.Builder();
         if (config.hasOozieAuthentication()) {
-            final String credentials = config.oozieUser + ":" + config.ooziePassword;
-            String credentialsBase64Encoded = Base64.getEncoder().encodeToString(credentials
-                    .getBytes(StandardCharsets.US_ASCII));
-            oozieClient.setHeader("Authorization", "Basic " + credentialsBase64Encoded);
+            builder = builder.authenticator(new Authenticator() {
+                public Request authenticate(Route route, Response response) throws IOException {
+                    String credential = Credentials.basic(config.oozieUser, config.ooziePassword);
+                    return response.request().newBuilder().header("Authorization", credential).build();
+                }
+            });
+        }
+        OkHttpClient httpClient = builder.build();
+
+        final OozieAdminInstrumentationCollector adminInstrumentationCollector =
+                new OozieAdminInstrumentationCollector(httpClient, config);
+        if (adminInstrumentationCollector.isAvailable()) {
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Registering Oozie admin instrumentation collector");
+            }
+            adminInstrumentationCollector.register();
+        }
+
+        final OozieAdminMetricsCollector adminMetricsCollector = new OozieAdminMetricsCollector(httpClient, config);
+        if (adminMetricsCollector.isAvailable()) {
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Registering Oozie admin metrics collector");
+            }
+            adminMetricsCollector.register();
         }
     }
 
@@ -83,27 +221,7 @@ public class OozieCollector extends Collector {
     }
 
     public List<MetricFamilySamples> collect() {
-        try (Gauge.Timer timer = METRIC_SCRAPE_DURATION.startTimer()) {
-            METRIC_SCRAPE_REQUESTS.inc();
-
-            final OozieClient.Metrics metrics = oozieClient.getMetrics();
-            if (null != metrics) {
-                addCounters(metrics.getCounters());
-                addGauges(metrics.getGauges(), "gauges");
-//                metrics.getHistograms() TODO!
-//                addMetricsTimers(mfs, metrics.getTimers()); TODO!
-            } else {
-                final OozieClient.Instrumentation instrumentation = oozieClient.getInstrumentation();
-                addCounters(instrumentation.getCounters());
-                addGauges(instrumentation.getSamplers(), "samplers");
-                addGauges(instrumentation.getVariables(), "variables");
-                addInstrumentationTimers(instrumentation.getTimers());
-            }
-        } catch (Exception e) {
-            METRIC_SCRAPE_ERROR.inc();
-            LOGGER.error("Scrape failed", e);
-        }
-
+        // Already registered specific collectors.
         return Collections.emptyList();
     }
 
