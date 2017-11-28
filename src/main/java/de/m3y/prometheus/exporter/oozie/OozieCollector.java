@@ -32,6 +32,8 @@ import org.slf4j.LoggerFactory;
  * Collects stats from Apache Oozie via
  * <a href="http://oozie.apache.org/docs/4.2.0/WebServicesAPI.html#Oozie_Metrics">metrics</a> or
  * <a href="http://oozie.apache.org/docs/4.2.0/WebServicesAPI.html#Oozie_Instrumentation">instrumentation</a> API.
+ * <p>
+ * Note: Oozie unfortunately computes statistics, instead of providing the raw values.
  */
 public class OozieCollector extends Collector {
     private static final Logger LOGGER = LoggerFactory.getLogger(OozieCollector.class);
@@ -67,7 +69,7 @@ public class OozieCollector extends Collector {
 
     private static final OozieClientHack OOZIE_CLIENT_HACK = new OozieClientHack();
 
-    abstract class AbstractOozieCollector extends Collector {
+    static abstract class AbstractOozieCollector extends Collector {
         final OkHttpClient httpClient;
         final Request request;
         final String apiLabel;
@@ -114,11 +116,80 @@ public class OozieCollector extends Collector {
                 return false;
             }
         }
+
+       static void addGauges(Gauge gauge, Map<String, ?> gauges, String group) {
+            for (Entry<String, ?> gaugeEntry : gauges.entrySet()) {
+                final Object value = gaugeEntry.getValue();
+                if (value instanceof Number) {
+                    String key = gaugeEntry.getKey();
+                    int idx = key.indexOf('.');
+                    if (idx > 0) {
+                        String varType = key.substring(0, idx);
+                        String varName = key.substring(idx + 1);
+                        gauge.labels(varType, varName).set(((Number) value).doubleValue());
+                    } else {
+                        LOGGER.warn("Not supported : Ignoring oozie variable without group.name pattern : " + key);
+                    }
+                } else if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug("Ignoring unsupported type {} of {} : {} with value  {}",
+                            gaugeEntry.getValue().getClass(),
+                            group, gaugeEntry.getKey(), gaugeEntry.getValue()
+                    );
+                }
+            }
+        }
+
+        // TODO: should be counter instead of gauge, but counter can not set() value
+        static void addCounters(Gauge gauge, Map<String, Long> counters) {
+            for (Entry<String, Long> counterEntry : counters.entrySet()) {
+                // Example : jpa.GET_RUNNING_ACTIONS
+                final String key = counterEntry.getKey();
+                int idx = key.indexOf('.');
+                if (idx > 0) {
+                    String counterType = key.substring(0, idx);
+                    String counterName = key.substring(idx + 1);
+                    gauge.labels(counterType, counterName).set(counterEntry.getValue());
+                } else {
+                    LOGGER.warn("Not supported : oozie counter without counter type part in key " + key);
+                }
+            }
+        }
     }
 
-    class OozieAdminInstrumentationCollector extends AbstractOozieCollector {
+    /**
+     * Collects http://oozie.apache.org/docs/4.2.0/WebServicesAPI.html#Oozie_Instrumentation metrics.
+     */
+    static class OozieAdminInstrumentationCollector extends AbstractOozieCollector {
+        private static final String ADMIN_INSTRUMENTATION = "admin_instrumentation";
+        private static final String ADMIN_INSTRUMENTATION_PREFIX = METRIC_PREFIX + ADMIN_INSTRUMENTATION + "_";
+        private static final Gauge INSTRUMENTATION_TIMER_OWN = Gauge.build()
+                .name(ADMIN_INSTRUMENTATION_PREFIX + "timer_own_seconds")
+                .help("Oozie timers: <Own> time spent on various Oozie internal operations")
+                .labelNames("timer_type", "timer_name", "timer_stat")
+                .register();
+        private static final Gauge INSTRUMENTATION_TIMER_TOTAL = Gauge.build()
+                .name(ADMIN_INSTRUMENTATION_PREFIX + "timer_total_seconds")
+                .help("Oozie timers: <Total> time spent on various Oozie internal operations")
+                .labelNames("timer_type", "timer_name", "timer_stat")
+                .register();
+        private static final Gauge INSTRUMENTATION_TIMER_TICKS = Gauge.build()
+                .name(ADMIN_INSTRUMENTATION_PREFIX + "timer_ticks_total")
+                .help("Oozie timers: Various Oozie internal operation ticks")
+                .labelNames("timer_type", "timer_name")
+                .register();
+        private static final Gauge INSTRUMENTATION_VARIABLES = Gauge.build()
+                .name(ADMIN_INSTRUMENTATION_PREFIX + "variable")
+                .help("Oozie variables: Oozie internal vars (numerics only)")
+                .labelNames("var_group", "var_name")
+                .register();
+        //       Change to counter_total, if using Prometheus Counter instead of Gauge is possible
+        private static final Gauge INSTRUMENTATION_COUNTER = Gauge.build()
+                .name(ADMIN_INSTRUMENTATION_PREFIX + "counter")
+                .help("Oozie counters")
+                .labelNames("counter_type", "counter_name").register();
+
         OozieAdminInstrumentationCollector(OkHttpClient httpClient, Config config) {
-            super("admin_instrumentation",
+            super(ADMIN_INSTRUMENTATION,
                     httpClient,
                     new Request.Builder()
                             .url(config.oozieApiUrl + '/' + RestConstants.ADMIN + '/' + RestConstants.ADMIN_INSTRUMENTATION_RESOURCE)
@@ -128,9 +199,9 @@ public class OozieCollector extends Collector {
         @Override
         public void scrape() {
             final OozieClient.Instrumentation instrumentation = getInstrumentation();
-            addCounters(instrumentation.getCounters());
-            addGauges(instrumentation.getSamplers(), "samplers");
-            addGauges(instrumentation.getVariables(), "variables");
+            addCounters(INSTRUMENTATION_COUNTER, instrumentation.getCounters());
+            addGauges(INSTRUMENTATION_VARIABLES, instrumentation.getSamplers(), "samplers");
+            addGauges(INSTRUMENTATION_VARIABLES, instrumentation.getVariables(), "variables");
             addInstrumentationTimers(instrumentation.getTimers());
         }
 
@@ -138,6 +209,34 @@ public class OozieCollector extends Collector {
             JSONObject json = parseJsonObject(request);
             fixBrokenOozieInstrumentationJson(json, "");
             return OOZIE_CLIENT_HACK.createInstrumentation(json);
+        }
+
+
+        private void addInstrumentationTimers(Map<String, OozieClient.Instrumentation.Timer> timers) {
+            for (Entry<String, OozieClient.Instrumentation.Timer> timerEntry : timers.entrySet()) {
+                final OozieClient.Instrumentation.Timer value = timerEntry.getValue();
+
+                final String key = timerEntry.getKey();
+                int idx = key.indexOf('.');
+                if (idx > 0) {
+                    String timerType = key.substring(0, idx);
+                    String timerName = key.substring(idx + 1);
+                    INSTRUMENTATION_TIMER_TOTAL.labels(timerType, timerName, "std_dev")
+                            .set(value.getTotalTimeStandardDeviation() / 1000d /* Convert ms to seconds */);
+                    INSTRUMENTATION_TIMER_TOTAL.labels(timerType, timerName, "avg").set(value.getTotalTimeAverage() / 1000d);
+                    INSTRUMENTATION_TIMER_TOTAL.labels(timerType, timerName, "min").set(value.getTotalMinTime() / 1000d);
+                    INSTRUMENTATION_TIMER_TOTAL.labels(timerType, timerName, "max").set(value.getTotalMaxTime() / 1000d);
+
+                    INSTRUMENTATION_TIMER_OWN.labels(timerType, timerName, "std_dev").set(value.getOwnTimeStandardDeviation() / 1000d);
+                    INSTRUMENTATION_TIMER_OWN.labels(timerType, timerName, "avg").set(value.getOwnTimeAverage() / 1000d);
+                    INSTRUMENTATION_TIMER_OWN.labels(timerType, timerName, "min").set(value.getOwnMinTime() / 1000d);
+                    INSTRUMENTATION_TIMER_OWN.labels(timerType, timerName, "max").set(value.getOwnMaxTime() / 1000d);
+
+                    INSTRUMENTATION_TIMER_TICKS.labels(timerType, timerName).set(value.getTicks());
+                } else {
+                    LOGGER.warn("Not supported : oozie instrumentation timer without timer type part in key " + key);
+                }
+            }
         }
 
         /**
@@ -172,9 +271,28 @@ public class OozieCollector extends Collector {
         }
     }
 
-    class OozieAdminMetricsCollector extends AbstractOozieCollector {
+    /**
+     * Collects http://oozie.apache.org/docs/4.2.0/WebServicesAPI.html#Oozie_Metrics .
+     * <p>
+     * Note: Does currently not support Timers and Histogram.
+     */
+    static class OozieAdminMetricsCollector extends AbstractOozieCollector {
+        private static final String ADMIN_METRICS = "admin_metrics";
+        private static final String ADMIN_METRICS_PREFIX = METRIC_PREFIX + ADMIN_METRICS + "_";
+
+        private static final Gauge METRICS_VARIABLES = Gauge.build()
+                .name(ADMIN_METRICS_PREFIX + "variable")
+                .help("Oozie variables: Oozie internal vars (numerics only)")
+                .labelNames("var_group", "var_name")
+                .register();
+        //       Change to counter_total, if using Prometheus Counter instead of Gauge is possible
+        private static final Gauge METRICS_COUNTER = Gauge.build()
+                .name(ADMIN_METRICS_PREFIX + "counter")
+                .help("Oozie counters")
+                .labelNames("counter_type", "counter_name").register();
+
         OozieAdminMetricsCollector(OkHttpClient httpClient, Config config) {
-            super("admin_metrics",
+            super(ADMIN_METRICS,
                     httpClient,
                     new Request.Builder()
                             .url(config.oozieApiUrl + '/' + RestConstants.ADMIN + '/' + RestConstants.ADMIN_METRICS_RESOURCE)
@@ -184,8 +302,8 @@ public class OozieCollector extends Collector {
         @Override
         public void scrape() {
             final Metrics metrics = getMetrics();
-            addCounters(metrics.getCounters());
-            addGauges(metrics.getGauges(), "gauges");
+            addCounters(METRICS_COUNTER, metrics.getCounters());
+            addGauges(METRICS_VARIABLES, metrics.getGauges(), "gauges");
             //                metrics.getHistograms() TODO!
             //                addMetricsTimers(mfs, metrics.getTimers()); TODO!
         }
@@ -194,7 +312,6 @@ public class OozieCollector extends Collector {
             JSONObject json = parseJsonObject(request);
             return OOZIE_CLIENT_HACK.createMetrics(json);
         }
-
     }
 
     OozieCollector(Config config) {
@@ -253,7 +370,6 @@ public class OozieCollector extends Collector {
         try {
             SSLContext sc = SSLContext.getInstance("TLS");
             sc.init(null, trustAllCerts, null);
-//            HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
             builder.sslSocketFactory(sc.getSocketFactory(), (X509TrustManager) trustAllCerts[0]);
             HostnameVerifier trustAnyHostnameVerifier = (host, session) -> true;
             builder.hostnameVerifier(trustAnyHostnameVerifier);
@@ -267,106 +383,6 @@ public class OozieCollector extends Collector {
         return Collections.emptyList();
     }
 
-//    private void addMetricsTimers(List<MetricFamilySamples> mfs, Map<String, OozieClient.Metrics.Timer> timers) {
-//        for (Map.Entry<String, OozieClient.Metrics.Timer> timerEntry : timers.entrySet()) {
-//            final OozieClient.Metrics.Timer value = timerEntry.getValue();
-//            final String namePrefix = createName(timerEntry.getKey());
-//            TODO !!!
-//        }
-//        LOGGER.warn("Not yet impl! TODO!!!");
-//    }
-
-
-    static final Gauge TIMER_OWN = Gauge.build()
-            .name(METRIC_PREFIX + "timer_own_seconds")
-            .help("Oozie timers: <Own> time spent on various Oozie internal operations")
-            .labelNames("timer_type", "timer_name", "timer_stat")
-            .register();
-    static final Gauge TIMER_TOTAL = Gauge.build()
-            .name(METRIC_PREFIX + "timer_total_seconds")
-            .help("Oozie timers: <Total> time spent on various Oozie internal operations")
-            .labelNames("timer_type", "timer_name", "timer_stat")
-            .register();
-    static final Gauge TIMER_TICKS = Gauge.build()
-            .name(METRIC_PREFIX + "timer_ticks_total")
-            .help("Oozie timers: Various Oozie internal operation ticks")
-            .labelNames("timer_type", "timer_name")
-            .register();
-
-    private void addInstrumentationTimers(Map<String, OozieClient.Instrumentation.Timer> timers) {
-        for (Entry<String, OozieClient.Instrumentation.Timer> timerEntry : timers.entrySet()) {
-            final OozieClient.Instrumentation.Timer value = timerEntry.getValue();
-
-            final String key = timerEntry.getKey();
-            int idx = key.indexOf('.');
-            if (idx > 0) {
-                String timerType = key.substring(0, idx);
-                String timerName = key.substring(idx + 1);
-                TIMER_TOTAL.labels(timerType, timerName, "std_dev")
-                        .set(value.getTotalTimeStandardDeviation() / 1000d /* Convert ms to seconds */);
-                TIMER_TOTAL.labels(timerType, timerName, "avg").set(value.getTotalTimeAverage() / 1000d);
-                TIMER_TOTAL.labels(timerType, timerName, "min").set(value.getTotalMinTime() / 1000d);
-                TIMER_TOTAL.labels(timerType, timerName, "max").set(value.getTotalMaxTime() / 1000d);
-
-                TIMER_OWN.labels(timerType, timerName, "std_dev").set(value.getOwnTimeStandardDeviation() / 1000d);
-                TIMER_OWN.labels(timerType, timerName, "avg").set(value.getOwnTimeAverage() / 1000d);
-                TIMER_OWN.labels(timerType, timerName, "min").set(value.getOwnMinTime() / 1000d);
-                TIMER_OWN.labels(timerType, timerName, "max").set(value.getOwnMaxTime() / 1000d);
-
-                TIMER_TICKS.labels(timerType, timerName).set(value.getTicks());
-            } else {
-                LOGGER.warn("Not supported : oozie instrumentation timer without timer type part in key " + key);
-            }
-        }
-    }
-
-    static final Gauge VARIABLES = Gauge.build()
-            .name(METRIC_PREFIX + "variables")
-            .help("Oozie variables: Oozie internal vars (numerics only)")
-            .labelNames("var_group", "var_name")
-            .register();
-
-    private void addGauges(Map<String, ?> gauges, String group) {
-        for (Entry<String, ?> gaugeEntry : gauges.entrySet()) {
-            final Object value = gaugeEntry.getValue();
-            if (value instanceof Number) {
-                String key = gaugeEntry.getKey();
-                int idx = key.indexOf('.');
-                if (idx > 0) {
-                    String varType = key.substring(0, idx);
-                    String varName = key.substring(idx + 1);
-                    VARIABLES.labels(varType, varName).set(((Number) value).doubleValue());
-                } else {
-                    LOGGER.warn("Not supported : Ignoring oozie instrumentation variable without group.name pattern : " + key);
-                }
-            } else if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug("Ignoring unsupported type {} of {} : {} with value  {}",
-                        gaugeEntry.getValue().getClass(),
-                        group, gaugeEntry.getKey(), gaugeEntry.getValue()
-                );
-            }
-        }
-    }
-
-    static final Gauge COUNTER = Gauge.build() // TODO: should be counter, but counter can not set() value
-            .name(METRIC_PREFIX + "counter")   //       Change to counter_total, if using Prometheus Counter instead of Gauge is possible
-            .help("Oozie counters")
-            .labelNames("counter_type", "counter_name").register();
-
-    private void addCounters(Map<String, Long> counters) {
-        for (Entry<String, Long> counterEntry : counters.entrySet()) {
-            // Example : jpa.GET_RUNNING_ACTIONS
-            final String key = counterEntry.getKey();
-            int idx = key.indexOf('.');
-            if (idx > 0) {
-                String counterType = key.substring(0, idx);
-                String counterName = key.substring(idx + 1);
-                COUNTER.labels(counterType, counterName).set(counterEntry.getValue());
-            } else {
-                LOGGER.warn("Not supported : oozie counter without counter type part in key " + key);
-            }
-        }
-    }
 
     private static final Pattern PATTERN_INVALID_METRIC_NAME_CHARS = Pattern.compile("[.\\-#]");
 
