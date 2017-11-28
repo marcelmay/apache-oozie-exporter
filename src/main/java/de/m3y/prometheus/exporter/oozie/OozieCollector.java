@@ -22,6 +22,7 @@ import okhttp3.*;
 import org.apache.oozie.client.OozieClient;
 import org.apache.oozie.client.OozieClient.Metrics;
 import org.apache.oozie.client.rest.RestConstants;
+import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;
 import org.slf4j.Logger;
@@ -79,7 +80,9 @@ public class OozieCollector extends Collector {
 
         JSONObject parseJsonObject(Request apiRequest) {
             try {
-                return (JSONObject) JSONValue.parse(httpClient.newCall(apiRequest).execute().body().string());
+                Response response = httpClient.newCall(apiRequest).execute();
+                String body = response.body().string();
+                return (JSONObject) JSONValue.parse(body);
             } catch (IOException e) {
                 throw new IllegalStateException("Can not invoke/parse call to " + apiRequest.url());
             }
@@ -102,7 +105,10 @@ public class OozieCollector extends Collector {
         boolean isAvailable() {
             try {
                 final Response response = httpClient.newCall(request).execute();
-                LOGGER.info("Calling "+request.url() + " : " + response.code() + " / " + response.body().string());
+                LOGGER.info("Checking availability of " + request.url() + " : " + response.code());
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.info("Result fetched is: " + response.body().string());
+                }
                 return response.code() == 200;
             } catch (IOException e) {
                 return false;
@@ -130,7 +136,39 @@ public class OozieCollector extends Collector {
 
         public OozieClient.Instrumentation getInstrumentation() {
             JSONObject json = parseJsonObject(request);
+            fixBrokenOozieInstrumentationJson(json, "");
             return OOZIE_CLIENT_HACK.createInstrumentation(json);
+        }
+
+        /**
+         * Oozie sometimes returns null values ... which its own data classes can not parse.
+         * This fixes null values by setting value to 0.
+         *
+         * @param json the json object.
+         * @param path the current path.
+         */
+        private void fixBrokenOozieInstrumentationJson(JSONObject json, String path) {
+            Set<Map.Entry<String, Object>> entries = json.entrySet();
+            for (Entry<String, Object> entry : entries) {
+                Object value = entry.getValue();
+                String currentPath = path + "/" + entry.getKey();
+                if (value instanceof JSONObject) {
+                    fixBrokenOozieInstrumentationJson((JSONObject) value, currentPath);
+                } else if (value instanceof JSONArray) {
+                    JSONArray array = (JSONArray) value;
+                    for (int i = 0; i < array.size(); i++) {
+                        fixBrokenOozieInstrumentationJson((JSONObject) array.get(i), currentPath + "[" + i + "]");
+                    }
+                } else {
+                    if (null == value) {
+                        if (LOGGER.isDebugEnabled()) {
+                            LOGGER.debug("Fixing " + currentPath + " with value " + entry.getKey());
+                        }
+                        entry.setValue(0);
+                    }
+                }
+            }
+
         }
     }
 
@@ -256,7 +294,7 @@ public class OozieCollector extends Collector {
             .register();
 
     private void addInstrumentationTimers(Map<String, OozieClient.Instrumentation.Timer> timers) {
-        for (Map.Entry<String, OozieClient.Instrumentation.Timer> timerEntry : timers.entrySet()) {
+        for (Entry<String, OozieClient.Instrumentation.Timer> timerEntry : timers.entrySet()) {
             final OozieClient.Instrumentation.Timer value = timerEntry.getValue();
 
             final String key = timerEntry.getKey();
@@ -289,7 +327,7 @@ public class OozieCollector extends Collector {
             .register();
 
     private void addGauges(Map<String, ?> gauges, String group) {
-        for (Map.Entry<String, ?> gaugeEntry : gauges.entrySet()) {
+        for (Entry<String, ?> gaugeEntry : gauges.entrySet()) {
             final Object value = gaugeEntry.getValue();
             if (value instanceof Number) {
                 String key = gaugeEntry.getKey();
@@ -316,7 +354,7 @@ public class OozieCollector extends Collector {
             .labelNames("counter_type", "counter_name").register();
 
     private void addCounters(Map<String, Long> counters) {
-        for (Map.Entry<String, Long> counterEntry : counters.entrySet()) {
+        for (Entry<String, Long> counterEntry : counters.entrySet()) {
             // Example : jpa.GET_RUNNING_ACTIONS
             final String key = counterEntry.getKey();
             int idx = key.indexOf('.');
