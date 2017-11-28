@@ -3,13 +3,17 @@ package de.m3y.prometheus.exporter.oozie;
 import java.io.IOException;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
 import java.util.regex.Pattern;
-import javax.net.ssl.*;
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 import io.prometheus.client.Collector;
 import io.prometheus.client.Counter;
@@ -157,13 +161,13 @@ public class OozieCollector extends Collector {
 
     OozieCollector(Config config) {
         if (LOGGER.isInfoEnabled()) {
-            LOGGER.info("Starting Oozie exporter with Oozie API base URL  "+config.oozieApiUrl);
-        }
-        if (config.skipHttpsVerification) {
-            disableHttpsVerification();
+            LOGGER.info("Starting Oozie exporter with Oozie API base URL  " + config.oozieApiUrl);
         }
 
         OkHttpClient.Builder builder = new OkHttpClient.Builder();
+        if (config.skipHttpsVerification) {
+            disableHttpsVerification(builder);
+        }
         if (config.hasOozieAuthentication()) {
             builder = builder.authenticator(new Authenticator() {
                 public Request authenticate(Route route, Response response) throws IOException {
@@ -192,11 +196,11 @@ public class OozieCollector extends Collector {
         }
     }
 
-    private void disableHttpsVerification() {
+    private void disableHttpsVerification(OkHttpClient.Builder builder) {
         TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {
             @Override
             public X509Certificate[] getAcceptedIssuers() {
-                return null;
+                return new X509Certificate[0];
             }
 
             @Override
@@ -209,15 +213,15 @@ public class OozieCollector extends Collector {
         }};
 
         try {
-            SSLContext sc = SSLContext.getInstance("SSL");
-            sc.init(null, trustAllCerts, new SecureRandom());
-            HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+            SSLContext sc = SSLContext.getInstance("TLS");
+            sc.init(null, trustAllCerts, null);
+//            HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+            builder.sslSocketFactory(sc.getSocketFactory(), (X509TrustManager) trustAllCerts[0]);
+            HostnameVerifier trustAnyHostnameVerifier = (host, session) -> true;
+            builder.hostnameVerifier(trustAnyHostnameVerifier);
         } catch (NoSuchAlgorithmException | KeyManagementException e) {
             throw new IllegalStateException(e);
         }
-
-        HostnameVerifier trustAnyHostnameVerifier = (host, session) -> true;
-        HttpsURLConnection.setDefaultHostnameVerifier(trustAnyHostnameVerifier);
     }
 
     public List<MetricFamilySamples> collect() {
