@@ -11,18 +11,18 @@
 
     <description>Apache Oozie Exporter allows exporting Oozie statistics for Prometheus from the Oozie API.
     </description>
-    <url>https://github.com/marcelmay/oozie-exporter.git</url>
+    <url>https://github.com/marcelmay/apache-oozie-exporter.git</url>
 
     <scm>
-        <connection>scm:git:https://github.com/marcelmay/oozie-exporter.git</connection>
-        <developerConnection>scm:git:git@github.com:marcelmay/oozie-exporter.git</developerConnection>
-        <url>https://github.com/marcelmay/oozie-exporter</url>
+        <connection>scm:git:https://github.com/marcelmay/apache-oozie-exporter.git</connection>
+        <developerConnection>scm:git:git@github.com:marcelmay/apache-oozie-exporter.git</developerConnection>
+        <url>https://github.com/marcelmay/apache-oozie-exporter</url>
         <tag>HEAD</tag>
     </scm>
 
     <issueManagement>
         <system>github</system>
-        <url>https://github.com/marcelmay/oozie-exporter/issues</url>
+        <url>https://github.com/marcelmay/apache-oozie-exporter/issues</url>
     </issueManagement>
 
     <licenses>
