@@ -373,8 +373,7 @@
                                     <name>marcelmay/oozie-exporter</name>
                                     <build>
                                         <from>openjdk:8-jre-alpine</from>
-                                        <maintainer>https://github.com/marcelmay/oozie-exporter
-                                        </maintainer>
+                                        <maintainer>https://github.com/marcelmay/apache-oozie-exporter</maintainer>
                                         <tags>
                                             <tag>latest</tag>
                                             <tag>${project.version}</tag>
@@ -386,7 +385,7 @@
                                             <shmsize>2147483648</shmsize>
                                         </buildOptions>
                                         <env>
-                                            <JAVA_OPTS>-server -dsa -da -XX:+UseG1GC -Xmx1024m</JAVA_OPTS>
+                                            <JAVA_OPTS>-server -Xmx1024m</JAVA_OPTS>
                                         </env>
                                         <entryPoint>
                                             <!-- exec form for ENTRYPOINT -->
