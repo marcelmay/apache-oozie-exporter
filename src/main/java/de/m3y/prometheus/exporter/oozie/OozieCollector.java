@@ -69,7 +69,7 @@ public class OozieCollector extends Collector {
 
     private static final OozieClientHack OOZIE_CLIENT_HACK = new OozieClientHack();
 
-    static abstract class AbstractOozieCollector extends Collector {
+    abstract static class AbstractOozieCollector extends Collector {
         final OkHttpClient httpClient;
         final Request request;
         final String apiLabel;
@@ -99,7 +99,7 @@ public class OozieCollector extends Collector {
                 METRIC_SCRAPE_ERROR.labels(apiLabel).inc();
                 LOGGER.error("Scrape failed", e);
             }
-            return Collections.EMPTY_LIST;
+            return Collections.emptyList();
         }
 
         protected abstract void scrape();
@@ -107,9 +107,9 @@ public class OozieCollector extends Collector {
         boolean isAvailable() {
             try {
                 final Response response = httpClient.newCall(request).execute();
-                LOGGER.info("Checking availability of " + request.url() + " : " + response.code());
+                LOGGER.info("Checking availability of {} : {}", request.url(), response.code());
                 if (LOGGER.isDebugEnabled()) {
-                    LOGGER.info("Result fetched is: " + response.body().string());
+                    LOGGER.info("Result fetched is: {}", response.body().string());
                 }
                 return response.code() == 200;
             } catch (IOException e) {
@@ -128,7 +128,7 @@ public class OozieCollector extends Collector {
                         String varName = key.substring(idx + 1);
                         gauge.labels(varType, varName).set(((Number) value).doubleValue());
                     } else {
-                        LOGGER.warn("Not supported : Ignoring oozie variable without group.name pattern : " + key);
+                        LOGGER.warn("Not supported : Ignoring oozie variable without group.name pattern : {}", key);
                     }
                 } else if (LOGGER.isDebugEnabled()) {
                     LOGGER.debug("Ignoring unsupported type {} of {} : {} with value  {}",
@@ -150,7 +150,7 @@ public class OozieCollector extends Collector {
                     String counterName = key.substring(idx + 1);
                     gauge.labels(counterType, counterName).set(counterEntry.getValue());
                 } else {
-                    LOGGER.warn("Not supported : oozie counter without counter type part in key " + key);
+                    LOGGER.warn("Not supported : oozie counter without counter type part in key {}", key);
                 }
             }
         }
@@ -261,7 +261,7 @@ public class OozieCollector extends Collector {
                 } else {
                     if (null == value) {
                         if (LOGGER.isDebugEnabled()) {
-                            LOGGER.debug("Fixing " + currentPath + " with value " + entry.getKey());
+                            LOGGER.debug("Fixing {} with value {}", currentPath, entry.getKey());
                         }
                         entry.setValue(0);
                     }
@@ -358,10 +358,12 @@ public class OozieCollector extends Collector {
 
             @Override
             public void checkClientTrusted(X509Certificate[] chain, String authType) {
+                // Do nothing
             }
 
             @Override
             public void checkServerTrusted(X509Certificate[] chain, String authType) {
+                // Do nothing
             }
         }};
 
