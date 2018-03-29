@@ -1,7 +1,6 @@
 package de.m3y.prometheus.exporter.oozie;
 
 import java.io.IOException;
-import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -20,7 +19,7 @@ public class HomePageServlet extends HttpServlet {
     }
 
     @Override
-    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         StringBuilder buf = new StringBuilder().append("<html>\n"
                 + "<head><title>Apache Oozie Exporter</title></head>\n"
                 + "<body>\n"

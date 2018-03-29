@@ -86,7 +86,7 @@ public class OozieCollector extends Collector {
                 String body = response.body().string();
                 return (JSONObject) JSONValue.parse(body);
             } catch (IOException e) {
-                throw new IllegalStateException("Can not invoke/parse call to " + apiRequest.url());
+                throw new IllegalStateException("Can not invoke/parse call to " + apiRequest.url(), e);
             }
         }
 
@@ -324,11 +324,9 @@ public class OozieCollector extends Collector {
             disableHttpsVerification(builder);
         }
         if (config.hasOozieAuthentication()) {
-            builder = builder.authenticator(new Authenticator() {
-                public Request authenticate(Route route, Response response) throws IOException {
-                    String credential = Credentials.basic(config.oozieUser, config.ooziePassword);
-                    return response.request().newBuilder().header("Authorization", credential).build();
-                }
+            builder = builder.authenticator((route, response) -> {
+                String credential = Credentials.basic(config.oozieUser, config.ooziePassword);
+                return response.request().newBuilder().header("Authorization", credential).build();
             });
         }
         OkHttpClient httpClient = builder.build();

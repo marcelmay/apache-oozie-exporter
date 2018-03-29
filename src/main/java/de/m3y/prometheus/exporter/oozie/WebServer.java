@@ -55,9 +55,9 @@ public class WebServer {
     }
 
     private static void printUsageAndExit() {
-        System.err.println("");
+        System.err.println();
         System.err.println("Usage: WebServer <OPTIONS>");
-        System.err.println("");
+        System.err.println();
         System.err.println("OPTIONS:");
         System.err.println("    -web.listen-address=[<hostname>:]<port>  Exporter listener address"); // NOSONAR
         System.err.println("    -oozie.url=<Oozie API Url>               Oozie API oozieApiUrl, eg http://localhost:11000/oozie"); // NOSONAR
@@ -65,7 +65,7 @@ public class WebServer {
         System.err.println("    [-oozie.password=<PWD>]                  Oozie API password for authentication");
         System.err.println("    [-oozie.password.env=<ENV VAR>]          Env var containing Oozie API password for authentication");
         System.err.println("    [-skipHttpsVerification]                 Skip SSL/TLS verification for Oozie HTTPS URL"); // NOSONAR
-        System.err.println("");
+        System.err.println();
         System.exit(1);
     }
 
