@@ -87,7 +87,7 @@ When running the docker image via Maven, docker will mount the projects src/test
   ```
   
 * Test the exporter  
-  Open ```http://\<hostname>:\<port>/metrics``` or ```http://\<hostname>:\<port>/``` (for configuration overview)
+  Open ```http://<HOSTNAME>:<PORT>/metrics``` or ```http://<HOSTNAME>:<PORT>/``` (for configuration overview)
    
 * Add to prometheus
   ```
