@@ -85,7 +85,7 @@ public class OozieCollector extends Collector {
                 Response response = httpClient.newCall(apiRequest).execute();
                 String body = response.body().string();
                 return (JSONObject) JSONValue.parse(body);
-            } catch (IOException e) {
+            } catch (IOException | NullPointerException e) {
                 throw new IllegalStateException("Can not invoke/parse call to " + apiRequest.url(), e);
             }
         }
@@ -112,12 +112,12 @@ public class OozieCollector extends Collector {
                     LOGGER.info("Result fetched is: {}", response.body().string());
                 }
                 return response.code() == 200;
-            } catch (IOException e) {
+            } catch (IOException | NullPointerException e) {
                 return false;
             }
         }
 
-       static void addGauges(Gauge gauge, Map<String, ?> gauges, String group) {
+        static void updateGauges(Gauge gauge, Map<String, ?> gauges, String group) {
             for (Entry<String, ?> gaugeEntry : gauges.entrySet()) {
                 final Object value = gaugeEntry.getValue();
                 if (value instanceof Number) {
@@ -140,7 +140,7 @@ public class OozieCollector extends Collector {
         }
 
         // TODO: should be counter instead of gauge, but counter can not set() value
-        static void addCounters(Gauge gauge, Map<String, Long> counters) {
+        static void updateCounters(Gauge gauge, Map<String, Long> counters) {
             for (Entry<String, Long> counterEntry : counters.entrySet()) {
                 // Example : jpa.GET_RUNNING_ACTIONS
                 final String key = counterEntry.getKey();
@@ -199,9 +199,9 @@ public class OozieCollector extends Collector {
         @Override
         public void scrape() {
             final OozieClient.Instrumentation instrumentation = getInstrumentation();
-            addCounters(INSTRUMENTATION_COUNTER, instrumentation.getCounters());
-            addGauges(INSTRUMENTATION_VARIABLES, instrumentation.getSamplers(), "samplers");
-            addGauges(INSTRUMENTATION_VARIABLES, instrumentation.getVariables(), "variables");
+            updateCounters(INSTRUMENTATION_COUNTER, instrumentation.getCounters());
+            updateGauges(INSTRUMENTATION_VARIABLES, instrumentation.getSamplers(), "samplers");
+            updateGauges(INSTRUMENTATION_VARIABLES, instrumentation.getVariables(), "variables");
             addInstrumentationTimers(instrumentation.getTimers());
         }
 
@@ -290,6 +290,10 @@ public class OozieCollector extends Collector {
                 .name(ADMIN_METRICS_PREFIX + "counter")
                 .help("Oozie counters")
                 .labelNames("counter_type", "counter_name").register();
+        private static final Gauge METRICS_TIMER = Gauge.build()
+                .name(ADMIN_METRICS_PREFIX + "timer")
+                .help("Oozie timers")
+                .labelNames("timer_group", "timer_name", "timer_type").register();
 
         OozieAdminMetricsCollector(OkHttpClient httpClient, Config config) {
             super(ADMIN_METRICS,
@@ -302,10 +306,66 @@ public class OozieCollector extends Collector {
         @Override
         public void scrape() {
             final Metrics metrics = getMetrics();
-            addCounters(METRICS_COUNTER, metrics.getCounters());
-            addGauges(METRICS_VARIABLES, metrics.getGauges(), "gauges");
+            updateCounters(METRICS_COUNTER, metrics.getCounters());
+            updateGauges(METRICS_VARIABLES, metrics.getGauges(), "gauges");
             //                metrics.getHistograms() TODO!
-            //                addMetricsTimers(mfs, metrics.getTimers()); TODO!
+            updateTimers(METRICS_TIMER, metrics.getTimers());
+        }
+
+        private void updateTimers(Gauge timer, Map<String, Metrics.Timer> timers) {
+            for (Entry<String, ?> timerEntry : timers.entrySet()) {
+                final Object value = timerEntry.getValue();
+                if (value instanceof OozieClient.Metrics.Timer) {
+                    updateTimer(timer, timerEntry.getKey(), (Metrics.Timer) value);
+                } else {
+                    LOGGER.warn("Ignoring unsupported type {} of {}  with value  {}",
+                            value.getClass(),
+                            timerEntry.getKey(), value
+                    );
+                }
+            }
+        }
+
+        private void updateTimer(Gauge gauge, String timerKey, Metrics.Timer timer) {
+            int idx = timerKey.indexOf('.');
+            if (idx > 0) {
+                String varType = timerKey.substring(0, idx);
+                String varName = timerKey.substring(idx + 1);
+                if (varName.endsWith(".timer")) {
+                    varName = varName.substring(0, varName.length() - ".timer".length());
+                }
+
+                gauge.labels(varType, varName, "count").set(timer.getCount());
+
+                double conversionDuration = 1000; // Prometheus uses seconds
+                final String durationUnits = timer.getDurationUnits();
+                if (!"milliseconds".equalsIgnoreCase(durationUnits)) {
+                    LOGGER.warn("Conversion of duration unit {} not supported", durationUnits);
+                } else {
+                    gauge.labels(varType, varName, "999th percentile").set(timer.get999thPercentile() / conversionDuration);
+                    gauge.labels(varType, varName, "99th percentile").set(timer.get99thPercentile() / conversionDuration);
+                    gauge.labels(varType, varName, "98th percentile").set(timer.get98thPercentile() / conversionDuration);
+                    gauge.labels(varType, varName, "95th percentile").set(timer.get95thPercentile() / conversionDuration);
+                    gauge.labels(varType, varName, "75th percentile").set(timer.get75thPercentile() / conversionDuration);
+                    gauge.labels(varType, varName, "50th percentile").set(timer.get50thPercentile() / conversionDuration);
+                    gauge.labels(varType, varName, "mean").set(timer.getMean() / conversionDuration);
+                    gauge.labels(varType, varName, "max").set(timer.getMax() / conversionDuration);
+                    gauge.labels(varType, varName, "min").set(timer.getMin() / conversionDuration);
+                    gauge.labels(varType, varName, "standard deviation").set(timer.getStandardDeviation());
+                }
+                double conversionRate = 1000; // Prometheus uses seconds
+                final String rateUnits = timer.getRateUnits();
+                if (!"calls/millisecond".equalsIgnoreCase(rateUnits)) {
+                    LOGGER.warn("Conversion of rate unit {} not supported", rateUnits);
+                } else {
+                    gauge.labels(varType, varName, "1 minute rate").set(timer.get1MinuteRate() / conversionRate);
+                    gauge.labels(varType, varName, "5 minute rate").set(timer.get5MinuteRate() / conversionRate);
+                    gauge.labels(varType, varName, "15 minute rate").set(timer.get15MinuteRate() / conversionRate);
+                    gauge.labels(varType, varName, "mean rate").set(timer.getMeanRate() / conversionRate);
+                }
+            } else {
+                LOGGER.warn("Not supported : Ignoring oozie timer without group.name pattern : {}", timerKey);
+            }
         }
 
         public Metrics getMetrics() {
