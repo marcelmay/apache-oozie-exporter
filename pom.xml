@@ -49,6 +49,9 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.build.timestamp.format>yyyy-MM-dd/HH:mm</maven.build.timestamp.format>
         <exporter.build.timestamp>${maven.build.timestamp}</exporter.build.timestamp>
+        <!-- Defaults, for building without Git checkout -->
+        <scmBranch>none</scmBranch>
+        <buildNumber>none</buildNumber>
     </properties>
 
     <prerequisites> <!-- For version:display-plugin-updates -->
