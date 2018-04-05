@@ -39,22 +39,6 @@ Available on [![Maven Central](https://img.shields.io/maven-central/v/de.m3y.pro
 
 ```mvn clean install```
 
-You can test the exporter using [run_example.sh](run_example.sh) after building.
-
-For building including docker image, run:
-
-```mvn clean install -Pdocker```
-
-You can run the docker image via maven, too:
-
-```mvn clean install docker:run -Pdocker```
-
-Or directly using docker command line
-
-```docker run -i -t -p 7772:7772 -v $PWD/src/test/resources:/fsimage-location -e "JAVA_OPTS=-server -XX:+UseG1GC -Xmx1024m" marcelmay/hadoop-hdfs-fsimage-exporter```
-
-When running the docker image via Maven, docker will mount the projects src/test/resources directory (with test fsimage) and expose the exporter on http://0.0.0.0:7772/ .
-
 ## Installation and configuration
 
 * Install JAR
