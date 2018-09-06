@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>de.m3y.prometheus.exporter.oozie</groupId>
-    <artifactId>oozie-exporter</artifactId>
+    <artifactId>apache-oozie-exporter</artifactId>
     <version>1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
     <name>Apache Oozie Exporter</name>
@@ -368,7 +368,7 @@
                                 <image>
                                     <name>marcelmay/oozie-exporter</name>
                                     <build>
-                                        <from>openjdk:8-jre-alpine</from>
+                                        <from>openjdk:8u171-jdk-alpine3.8</from>
                                         <maintainer>https://github.com/marcelmay/apache-oozie-exporter</maintainer>
                                         <tags>
                                             <tag>latest</tag>
@@ -381,7 +381,7 @@
                                             <shmsize>2147483648</shmsize>
                                         </buildOptions>
                                         <env>
-                                            <JAVA_OPTS>-server -Xmx1024m</JAVA_OPTS>
+                                            <JAVA_OPTS>-server -Xmx512m</JAVA_OPTS>
                                         </env>
                                         <entryPoint>
                                             <!-- exec form for ENTRYPOINT -->
@@ -419,17 +419,17 @@
                         </configuration>
                         <executions>
                             <execution>
+                                <id>docker-sources</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>source</goal>
+                                </goals>
+                            </execution>
+                            <execution>
                                 <id>docker-package</id>
                                 <phase>package</phase>
                                 <goals>
                                     <goal>build</goal>
-                                </goals>
-                            </execution>
-                            <execution>
-                                <id>docker-sources</id>
-                                <phase>generate-sources</phase>
-                                <goals>
-                                    <goal>source</goal>
                                 </goals>
                             </execution>
                             <execution>
