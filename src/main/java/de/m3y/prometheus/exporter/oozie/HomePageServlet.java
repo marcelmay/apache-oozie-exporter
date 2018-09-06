@@ -33,7 +33,8 @@ public class HomePageServlet extends HttpServlet {
                 + "<li>SCM version : ").append(buildInfoExporter.getBuildScmVersion()).append("</li>"
                 + "</ul>"
                 + "<h2>Configuration</h2><ul>"
-                + "<li>Oozie URL : ").append(config.oozieApiUrl).append("</li>"
+                + "<li>Oozie URL  : ").append(config.oozieApiUrl).append("</li>"
+                + "<li>Oozie user : ").append(config.oozieUser).append("</li>"
                 + "<li>Skip HTTPS verification : ").append(config.skipHttpsVerification).append("</li>");
         buf.append(
                 "</ul></body>\n"
