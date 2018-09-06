@@ -101,7 +101,7 @@ TODO
 This Apache Oozie Exporter is released under the [Apache 2.0 license](LICENSE).
 
 ```
-Copyright 2017 Marcel May  
+Copyright 2017-2018 Marcel May  
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
