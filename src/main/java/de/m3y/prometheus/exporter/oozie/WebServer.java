@@ -4,7 +4,7 @@ import java.net.InetSocketAddress;
 import java.util.Arrays;
 
 import io.prometheus.client.exporter.MetricsServlet;
-import io.prometheus.client.hotspot.MemoryPoolsExports;
+import io.prometheus.client.hotspot.DefaultExports;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -14,11 +14,10 @@ public class WebServer {
     private Server server;
 
     WebServer configure(Config config) {
-        // Metrics
+        DefaultExports.initialize();
+
         final OozieCollector oozieCollector = new OozieCollector(config);
         oozieCollector.register();
-
-        new MemoryPoolsExports().register();
 
         final BuildInfoExporter buildInfo = new BuildInfoExporter("oozie_exporter_",
                 "oozie_exporter").register();
@@ -42,7 +41,7 @@ public class WebServer {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
-            System.err.println("Expected more arguments, got "+Arrays.toString(args));
+            System.err.println("Expected more arguments, got " + Arrays.toString(args));
             printUsageAndExit();
         }
 
