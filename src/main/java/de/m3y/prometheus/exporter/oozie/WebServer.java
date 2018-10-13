@@ -5,6 +5,8 @@ import java.util.Arrays;
 
 import io.prometheus.client.exporter.MetricsServlet;
 import io.prometheus.client.hotspot.DefaultExports;
+import org.apache.log4j.Level;
+import org.apache.log4j.spi.RootLogger;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -64,11 +66,14 @@ public class WebServer {
         System.err.println("    [-oozie.password=<PWD>]                  Oozie API password for authentication");
         System.err.println("    [-oozie.password.env=<ENV VAR>]          Env var containing Oozie API password for authentication");
         System.err.println("    [-skipHttpsVerification]                 Skip SSL/TLS verification for Oozie HTTPS URL"); // NOSONAR
+        System.err.println("    [-Dlog.level=[DEBUG|INFO|WARN|ERROR]]    Sets the log level. Defaults to INFO"); // NOSONAR
         System.err.println();
         System.exit(1);
     }
 
     private static Config parseArgs(String[] args) {
+        RootLogger.getRootLogger().setLevel(Level.toLevel(System.getProperty("log.level"), Level.INFO));
+
         Config config = new Config();
         for (String arg : args) {
             if (arg.equals("-skipHttpsVerification")) {

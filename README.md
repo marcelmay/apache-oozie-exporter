@@ -59,12 +59,13 @@ Available on [![Maven Central](https://img.shields.io/maven-central/v/de.m3y.pro
     [-oozie.password=<PWD>]                  Oozie API password for authentication
     [-oozie.password.env=<ENV VAR>]          Env var containing Oozie API password for authentication
     [-skipHttpsVerification]                 Skip SSL/TLS verification for Oozie HTTPS URL
+    [-Dlog.level=[DEBUG|INFO|WARN|ERROR]]    Sets the log level. Defaults to INFO
 
   ```
   
   * Run exporter
   ```
-  > java -server \
+  > java -Xmx128m -server \
          -jar oozie-exporter.jar \
          -web.listen-address=localhost:7772 \
          -oozie.url=http://localhost:11000/oozie
