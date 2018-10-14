@@ -2,9 +2,11 @@ package de.m3y.prometheus.exporter.oozie;
 
 import java.io.IOException;
 
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.util.EntityUtils;
 import org.eclipse.jetty.server.Server;
 import org.junit.After;
 import org.junit.Before;
@@ -16,7 +18,7 @@ import static org.junit.Assert.assertEquals;
 public class WebServerIT {
     private Server server;
     private String exporterBaseUrl;
-    private OkHttpClient client;
+    private HttpClient client;
 
     @Before
     public void setUp() throws Exception {
@@ -27,7 +29,8 @@ public class WebServerIT {
 
         server = new WebServer().configure(config).start();
         exporterBaseUrl = "http://localhost:7772";
-        client = new OkHttpClient();
+        HttpClientBuilder httpClientBuilder = HttpClientBuilder.create();
+        client = httpClientBuilder.build();
     }
 
     @After
@@ -37,9 +40,9 @@ public class WebServerIT {
 
     @Test
     public void testMetrics() throws Exception {
-        Response response = getResponse(exporterBaseUrl + "/metrics");
-        assertEquals(200, response.code());
-        String body = response.body().string();
+        HttpResponse response = getResponse(exporterBaseUrl + "/metrics");
+        assertEquals(200, response.getStatusLine().getStatusCode());
+        String body = EntityUtils.toString(response.getEntity());
 
         // App info
         assertTrue(body.contains("oozie_exporter_app_info{appName=\"oozie_exporter\",appVersion=\""));
@@ -50,18 +53,16 @@ public class WebServerIT {
 
         // Test welcome page
         response = getResponse(exporterBaseUrl);
-        assertEquals(200, response.code());
-        body = response.body().string();
+        assertEquals(200, response.getStatusLine().getStatusCode());
+        body = EntityUtils.toString(response.getEntity());
         assertTrue(body.contains("Apache Oozie Exporter"));
         assertTrue(body.contains("SCM branch"));
         assertTrue(body.contains("SCM version"));
         assertTrue(body.contains("Metrics"));
     }
 
-    private Response getResponse(String url) throws IOException {
-        Request request = new Request.Builder()
-                .url(url)
-                .build();
-        return client.newCall(request).execute();
+    private HttpResponse getResponse(String url) throws IOException {
+        final HttpGet request = new HttpGet(url);
+        return client.execute(request);
     }
 }

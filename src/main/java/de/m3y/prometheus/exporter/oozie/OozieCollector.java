@@ -18,7 +18,15 @@ import javax.net.ssl.X509TrustManager;
 import io.prometheus.client.Collector;
 import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
-import okhttp3.*;
+import org.apache.http.HttpResponse;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.util.EntityUtils;
 import org.apache.oozie.client.OozieClient;
 import org.apache.oozie.client.OozieClient.Metrics;
 import org.apache.oozie.client.rest.RestConstants;
@@ -70,23 +78,23 @@ public class OozieCollector extends Collector {
     private static final OozieClientHack OOZIE_CLIENT_HACK = new OozieClientHack();
 
     abstract static class AbstractOozieCollector extends Collector {
-        final OkHttpClient httpClient;
-        final Request request;
+        final HttpClient httpClient;
+        final HttpGet request;
         final String apiLabel;
 
-        protected AbstractOozieCollector(String apiLabel, OkHttpClient httpClient, Request request) {
+        protected AbstractOozieCollector(String apiLabel, HttpClient httpClient, HttpGet request) {
             this.httpClient = httpClient;
             this.request = request;
             this.apiLabel = apiLabel;
         }
 
-        JSONObject parseJsonObject(Request apiRequest) {
+        JSONObject parseJsonObject(HttpGet apiRequest) {
             try {
-                Response response = httpClient.newCall(apiRequest).execute();
-                String body = response.body().string();
+                HttpResponse response = httpClient.execute(apiRequest);
+                String body = EntityUtils.toString(response.getEntity());
                 return (JSONObject) JSONValue.parse(body);
             } catch (IOException | NullPointerException e) {
-                throw new IllegalStateException("Can not invoke/parse call to " + apiRequest.url(), e);
+                throw new IllegalStateException("Can not invoke/parse call to " + apiRequest.getURI(), e);
             }
         }
 
@@ -106,12 +114,13 @@ public class OozieCollector extends Collector {
 
         boolean isAvailable() {
             try {
-                final Response response = httpClient.newCall(request).execute();
-                LOGGER.info("Checking availability of {} : {}", request.url(), response.code());
+                final HttpResponse response = httpClient.execute(request);
+                final int statusCode = response.getStatusLine().getStatusCode();
+                LOGGER.info("Checking availability of {} : {}", request.getURI(), statusCode);
                 if (LOGGER.isDebugEnabled()) {
-                    LOGGER.info("Result fetched is: {}", response.body().string());
+                    LOGGER.info("Result fetched is: {}", response.getStatusLine());
                 }
-                return response.code() == 200;
+                return statusCode >= 200 && statusCode < 300;
             } catch (IOException | NullPointerException e) {
                 return false;
             }
@@ -188,12 +197,12 @@ public class OozieCollector extends Collector {
                 .help("Oozie counters")
                 .labelNames("counter_type", "counter_name").register();
 
-        OozieAdminInstrumentationCollector(OkHttpClient httpClient, Config config) {
+        OozieAdminInstrumentationCollector(HttpClient httpClient, Config config) {
             super(ADMIN_INSTRUMENTATION,
                     httpClient,
-                    new Request.Builder()
-                            .url(config.oozieApiUrl + '/' + RestConstants.ADMIN + '/' + RestConstants.ADMIN_INSTRUMENTATION_RESOURCE)
-                            .build());
+                    new HttpGet(config.oozieApiUrl + '/' + RestConstants.ADMIN + '/'
+                            + RestConstants.ADMIN_INSTRUMENTATION_RESOURCE));
+
         }
 
         @Override
@@ -295,12 +304,11 @@ public class OozieCollector extends Collector {
                 .help("Oozie timers")
                 .labelNames("timer_group", "timer_name", "timer_type").register();
 
-        OozieAdminMetricsCollector(OkHttpClient httpClient, Config config) {
+        OozieAdminMetricsCollector(HttpClient httpClient, Config config) {
             super(ADMIN_METRICS,
                     httpClient,
-                    new Request.Builder()
-                            .url(config.oozieApiUrl + '/' + RestConstants.ADMIN + '/' + RestConstants.ADMIN_METRICS_RESOURCE)
-                            .build());
+                    new HttpGet(config.oozieApiUrl + '/' + RestConstants.ADMIN + '/'
+                            + RestConstants.ADMIN_METRICS_RESOURCE));
         }
 
         @Override
@@ -379,17 +387,20 @@ public class OozieCollector extends Collector {
             LOGGER.info("Starting Oozie exporter with Oozie API base URL  " + config.oozieApiUrl);
         }
 
-        OkHttpClient.Builder builder = new OkHttpClient.Builder();
+
+        final HttpClientBuilder httpClientBuilder = HttpClientBuilder.create();
+
+//        OkHttpClient.Builder builder = new OkHttpClient.Builder();
         if (config.skipHttpsVerification) {
-            disableHttpsVerification(builder);
+            disableHttpsVerification(httpClientBuilder);
         }
         if (config.hasOozieAuthentication()) {
-            builder = builder.authenticator((route, response) -> {
-                String credential = Credentials.basic(config.oozieUser, config.ooziePassword);
-                return response.request().newBuilder().header("Authorization", credential).build();
-            });
+            CredentialsProvider provider = new BasicCredentialsProvider();
+            UsernamePasswordCredentials credentials = new UsernamePasswordCredentials("user1", "user1Pass");
+            provider.setCredentials(AuthScope.ANY, credentials);
+            httpClientBuilder.setDefaultCredentialsProvider(provider);
         }
-        OkHttpClient httpClient = builder.build();
+        HttpClient httpClient = httpClientBuilder.build();
 
         final OozieAdminInstrumentationCollector adminInstrumentationCollector =
                 new OozieAdminInstrumentationCollector(httpClient, config);
@@ -409,7 +420,7 @@ public class OozieCollector extends Collector {
         }
     }
 
-    private void disableHttpsVerification(OkHttpClient.Builder builder) {
+    private void disableHttpsVerification(HttpClientBuilder builder) {
         TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {
             @Override
             public X509Certificate[] getAcceptedIssuers() {
@@ -430,9 +441,9 @@ public class OozieCollector extends Collector {
         try {
             SSLContext sc = SSLContext.getInstance("TLS");
             sc.init(null, trustAllCerts, null);
-            builder.sslSocketFactory(sc.getSocketFactory(), (X509TrustManager) trustAllCerts[0]);
+            builder.setSSLContext(sc);
             HostnameVerifier trustAnyHostnameVerifier = (host, session) -> true;
-            builder.hostnameVerifier(trustAnyHostnameVerifier);
+            builder.setSSLHostnameVerifier(trustAnyHostnameVerifier);
         } catch (NoSuchAlgorithmException | KeyManagementException e) {
             throw new IllegalStateException(e);
         }
