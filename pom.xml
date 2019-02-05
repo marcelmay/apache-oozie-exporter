@@ -368,7 +368,7 @@
                                 <image>
                                     <name>marcelmay/oozie-exporter</name>
                                     <build>
-                                        <from>openjdk:8u171-jdk-alpine3.8</from>
+                                        <from>openjdk:8u191-jre-alpine3.8</from>
                                         <maintainer>https://github.com/marcelmay/apache-oozie-exporter</maintainer>
                                         <tags>
                                             <tag>latest</tag>
